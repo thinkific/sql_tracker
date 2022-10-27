@@ -4,6 +4,23 @@ require 'fileutils'
 
 module SqlTracker
   class Handler
+    COMPONENTS_REGEX_MAP = {
+      :single_quotes => /'(?:[^']|'')*?(?:\\'.*|'(?!'))/,
+      :dollar_quotes => /(\$(?!\d)[^$]*?\$).*?(?:\1|$)/,
+      :uuids => /\{?(?:[0-9a-fA-F]\-*){32}\}?/,
+      :numeric_literals => /-?\b(?:[0-9]+\.)?[0-9]+([eE][+-]?[0-9]+)?\b/,
+      :boolean_literals => /\b(?:true|false|null)\b/i,
+      :comments => /(?:#|--).*?(?=\r|\n|$)/i,
+      :multi_line_comments => /\/\*(?:[^\/]|\/[^*])*?(?:\*\/|\/\*.*)/,
+    }
+
+    DIALECT_COMPONENTS = {
+      :postgres => [:single_quotes, :dollar_quotes, :uuids, :numeric_literals,
+        :boolean_literals, :comments, :multi_line_comments],
+    }
+
+    PLACEHOLDER = '???'.freeze
+
     attr_reader :data
 
     def initialize(config)
@@ -60,14 +77,24 @@ module SqlTracker
       @trace_path_matcher ||= %r{^(#{@config.tracked_paths.join('|')})\/}
     end
 
+    def self.generate_regex(dialect)
+      components = DIALECT_COMPONENTS[dialect]
+      Regexp.union(components.map { |component| COMPONENTS_REGEX_MAP[component] })
+    end
+
     def clean_sql_query(query)
       query.squish!
-      query.gsub!(/(\s(=|>|<|>=|<=|<>|!=)\s)('[^']+'|[\$\+\-\w\.]+)/, '\1xxx')
-      query.gsub!(/(\sIN\s)\([^\(\)]+\)/i, '\1(xxx)')
-      query.gsub!(/(\sBETWEEN\s)('[^']+'|[\+\-\w\.]+)(\sAND\s)('[^']+'|[\+\-\w\.]+)/i, '\1xxx\3xxx')
-      query.gsub!(/(\sVALUES\s)\(.+\)/i, '\1(xxx)')
-      query.gsub!(/(\s(LIKE|ILIKE|SIMILAR TO|NOT SIMILAR TO)\s)('[^']+')/i, '\1xxx')
-      query.gsub!(/(\s(LIMIT|OFFSET)\s)(\d+)/i, '\1xxx')
+
+      components = DIALECT_COMPONENTS[:postgres]
+      regex = Regexp.union(components.map { |component| COMPONENTS_REGEX_MAP[component] })
+      query = query.gsub(regex, PLACEHOLDER)
+
+      # query.gsub!(/(\s(=|>|<|>=|<=|<>|!=)\s)('[^']+'|[\$\+\-\w\.]+)/, '\1xxx')
+      # query.gsub!(/(\sIN\s)\([^\(\)]+\)/i, '\1(xxx)')
+      # query.gsub!(/(\sBETWEEN\s)('[^']+'|[\+\-\w\.]+)(\sAND\s)('[^']+'|[\+\-\w\.]+)/i, '\1xxx\3xxx')
+      # query.gsub!(/(\sVALUES\s)\(.+\)/i, '\1(xxx)')
+      # query.gsub!(/(\s(LIKE|ILIKE|SIMILAR TO|NOT SIMILAR TO)\s)('[^']+')/i, '\1xxx')
+      # query.gsub!(/(\s(LIMIT|OFFSET)\s)(\d+)/i, '\1xxx')
       query
     end
 
